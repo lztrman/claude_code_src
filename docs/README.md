@@ -1,96 +1,44 @@
-# Claude Code 源码研究索引
+# Claude Code 源码研究
 
-这份 `docs/` 不是“看完仓库后的随手笔记”，而是面向多轮继续研究的长期结构化档案。目标有三个：
+这套文档不是“按目录抄一遍”，而是按运行时主干、控制平面和异常设计点来组织。
 
-1. 把 `src/` 和 `vendor/` 的所有顶层模块都落到明确位置。
-2. 把最值得深入的异常点单独抽出来，避免被目录树淹没。
-3. 给下一轮继续研究留下前线和未决问题，而不是每次从零开始。
+当前已经完成两轮研究：
 
-## 当前结论
-
-- 这份仓库的本体不是“CLI 命令集合”，而是一个运行在终端里的 agent platform。
-- 最关键的三条主线是：
-  - `entrypoints/cli.tsx -> main.tsx`：启动、快路径、模式分流、总控装配。
-  - `screens/REPL.tsx`：交互式前台壳，吸纳消息流、权限、任务、远程、IDE、voice、plugins。
-  - `query.ts / QueryEngine.ts`：真正的 agent turn engine。
-- 最反常的几块不是业务功能，而是底层能力：
-  - 自带一整套终端渲染内核 `src/ink/`
-  - 纯 TypeScript 版 Yoga / native 替代层 `src/native-ts/`
-  - transcript-aware 权限分类器 `src/utils/permissions/`
-  - 把 computer-use 包成动态 MCP 的兼容设计 `src/utils/computerUse/`
-  - 容器内 CONNECT-over-WebSocket relay `src/upstreamproxy/`
-
-## 文档结构
-
-- [模块地图](./module-map.md)
-  - 所有顶层模块、文件数量、职责、对应研究章节
-- [运行时与入口](./modules/00-runtime-and-entrypoints.md)
-  - `src-root`、`entrypoints`、`cli`、`bootstrap`、`state`、`screens`、`query`、`migrations`、`assistant`
-- [UI 与终端内核](./modules/01-ui-and-terminal.md)
-  - `components`、`hooks`、`context`、`ink`、`keybindings`、`vim`、`buddy`、`voice`、`moreright`
-- [命令、工具与任务面](./modules/02-commands-tools-and-tasks.md)
-  - `commands`、`tools`、`tasks`、`coordinator`
-- [服务、扩展与远程控制](./modules/03-services-extensions-and-remote.md)
-  - `services`、`skills`、`plugins`、`bridge`、`remote`、`server`、`upstreamproxy`
-- [基础设施与策略底座](./modules/04-infrastructure-and-policy.md)
-  - `utils`、`constants`、`types`、`schemas`、`memdir`、`native-ts`、`outputStyles`、`vendor/*`
-- [异常点专题](./findings/interesting-anomalies.md)
-  - 跨模块排序后的“最有意思/最反常”实现
-- [下一轮前线](./frontier/next-pass.md)
-  - 下一次执行应该补齐什么、往哪里追加
+- 第一轮：铺开全库模块地图，覆盖 `src` 与 `vendor` 的顶层模块。
+- 第二轮：沿主执行链深挖启动入口、`REPL.tsx`、`query.ts`、`QueryEngine.ts`、工具生命周期、`services/mcp/client.ts`。
 
 ## 阅读顺序
 
-如果第一次进入这份仓库，建议按下面顺序：
+1. `module-map.md`
+2. `modules/00-runtime-and-entrypoints.md`
+3. `modules/01-ui-and-terminal.md`
+4. `modules/02-commands-tools-and-tasks.md`
+5. `modules/03-services-extensions-and-remote.md`
+6. `modules/04-infrastructure-and-policy.md`
+7. `findings/interesting-anomalies.md`
+8. `frontier/next-pass.md`
 
-1. 先看 [模块地图](./module-map.md)，建立顶层分块和文件规模感。
-2. 再看 [运行时与入口](./modules/00-runtime-and-entrypoints.md)，理解主链路。
-3. 然后在 [命令、工具与任务面](./modules/02-commands-tools-and-tasks.md) 和 [服务、扩展与远程控制](./modules/03-services-extensions-and-remote.md) 之间来回看。
-4. 最后看 [异常点专题](./findings/interesting-anomalies.md)，把值得深挖的部分单独拎出来。
+## 当前最重要的结论
 
-## 覆盖说明
+- 这不是“一个 CLI 项目”，而是一套终端原生 agent 平台。
+- `main.tsx` 和 `REPL.tsx` 形成双核心：前者控制进程级启动与模式分流，后者控制会话级运行时与前台交互。
+- `query.ts` 才是真正的一轮 agent turn 状态机；`QueryEngine.ts` 是对它的 headless/SDK 封装，不是完整替代。
+- `Tool.ts` 定义的不是轻量工具接口，而是模型执行面的正式协议对象。
+- `services/mcp/client.ts` 不是普通 SDK 包装层，而是 transport、auth、缓存、结果映射、重连策略汇聚的主干模块。
+- `src/ink/`、`src/native-ts/yoga-layout/`、`upstreamproxy/` 这些目录说明，这份代码库的技术野心明显超出“代码补全 CLI”。
 
-本轮已经覆盖 `src/` 与 `vendor/` 的所有顶层模块：
+## 第二轮新增深挖主题
 
-- `src-root`
-- `assistant`
-- `bootstrap`
-- `bridge`
-- `buddy`
-- `cli`
-- `commands`
-- `components`
-- `constants`
-- `context`
-- `coordinator`
-- `entrypoints`
-- `hooks`
-- `ink`
-- `keybindings`
-- `memdir`
-- `migrations`
-- `moreright`
-- `native-ts`
-- `outputStyles`
-- `plugins`
-- `query`
-- `remote`
-- `schemas`
-- `screens`
-- `server`
-- `services`
-- `skills`
-- `state`
-- `tasks`
-- `tools`
-- `types`
-- `upstreamproxy`
-- `utils`
-- `vim`
-- `voice`
-- `vendor/audio-capture-src`
-- `vendor/image-processor-src`
-- `vendor/modifiers-napi-src`
-- `vendor/url-handler-src`
+- 启动链精确调用图：`entrypoints/cli.tsx -> main.tsx -> init.ts -> setup.ts -> REPL/print`
+- `REPL.tsx` concern map：消息流、权限、任务、远端、IDE、overlay、性能优化都汇在同一控制平面
+- `query.ts` 序列化分析：预处理、流式采样、工具执行、续跑路径、终止路径
+- `QueryEngine.ts` 边界：它拥有什么、不拥有什么、为什么还不能替掉 REPL
+- 工具生命周期：注册、权限决策、执行、转写 transcript、背景任务语义
+- MCP 客户端架构：transport、auth、缓存、tool/resource/command 拉取、结果处理、特殊分支
 
-后续如果新增研究内容，优先更新对应模块章节；如果某个发现跨越多个模块，再补到 [异常点专题](./findings/interesting-anomalies.md)。
+## 文档组织原则
+
+- 模块级结论优先写进 `modules/`，不随意开散乱文档。
+- 跨模块异常先写进 `findings/interesting-anomalies.md`。
+- 下一轮待挖方向写进 `frontier/next-pass.md`。
+- 如果源码恢复状态与真实内部实现可能不一致，文档会明确标注“stub / overlay / external build 痕迹”。

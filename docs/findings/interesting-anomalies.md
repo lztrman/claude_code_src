@@ -1,211 +1,184 @@
 # 最有意思、最反常的部分
 
-这份列表不是按目录排，而是按“研究价值”和“反常程度”排。
+这份列表不是按目录排，而是按“研究价值”和“异常程度”排。
 
 ## 1. build-time feature gating 在塑造源码形状
 
-最值得先记住的一点：这里的 `feature(...)` 不是普通开关。
+这里的 `feature(...)` 远不只是运行时布尔开关。
 
-它实际上在做：
+它实际上参与：
 
-- ant/internal vs external 构建裁剪
 - dead-code elimination
-- 字符串泄漏规避
-- 导入路径重写
-- overlay/stub 切换
+- ant/internal 与 external 构建分化
+- import 路径切换
+- overlay / stub 留痕
+- 某些字符串与实现的完全剔除
 
-### 为什么反常
+所以这份代码的“真实形状”本来就是 build-dependent 的。
 
-很多仓库把 feature flag 写成运行时布尔值；Claude Code 则明显把 `bun:bundle` 当成“源码雕刻器”。
+## 2. import order 本身就是运行时契约
 
-## 2. `main.tsx` + `REPL.tsx` 形成“双巨石内核”
+这是第二轮最值得记住的新结论。
 
-- `main.tsx` 像进程级总控路由器
-- `REPL.tsx` 像终端前台应用内核
+入口层明显依赖：
 
-### 为什么有意思
+- 在导入 `main.tsx` 之前先改 env
+- 在 `main.tsx` 模块求值期就启动预热任务
+- 之后再在 `preAction` 里同步等待这些预热结果
 
-现代前端/CLI 项目通常会把复杂度拆成很多边界清晰的模块；这里则能看到长期产品化后，为保证整体一致性，复杂度重新汇聚回两个中心化文件。
+这是一种非常刻意的延迟隐藏策略，但代价是：正确性部分建立在模块求值顺序上，而不是只建立在显式函数调用上。
 
-## 3. `src/ink/` 基本是一台私有终端引擎
+## 3. `main.tsx` + `REPL.tsx` 形成双核心
 
-它自己维护：
+- `main.tsx` 负责进程级总控、模式分流、入口参数改写、interactive/headless 终局分叉
+- `REPL.tsx` 负责会话级控制、消息流、权限、任务、overlay、远端与宿主集成
+
+很多项目会努力把复杂度拆散；这份代码则在长期产品化后，把复杂度重新汇聚到两个中心文件。
+
+## 4. `REPL.tsx` 不是 screen，而是 control plane
+
+第二轮深挖后，这一点更加明确：
+
+- `messagesRef + setMessages` 才像真实消息源
+- `onSubmit` 是 transport 与输入路由器
+- `getFocusedInputDialog` 是 overlay 仲裁器
+- `onQuery/onQueryImpl` 是 turn 生命周期总控
+
+它把 transport、permissions、tasks、history mutation、performance shaping 都拉进同一控制平面。
+
+## 5. `src/ink/` 基本是一台私有终端引擎
+
+它维护的内容已经远超“用 Ink”：
 
 - reconciler
-- DOM
-- layout
+- DOM / layout
 - screen buffer
 - diff/render
-- termio parser
+- ANSI/OSC/CSI parser
+- terminal query
 - selection/search/cursor 语义
 
-### 为什么反常
+这解释了为什么终端前台能承载如此重的交互。
 
-普通终端 UI 项目不会把这么多层都收回自己维护。
+## 6. `src/native-ts/yoga-layout` 是纯 TypeScript Yoga
 
-## 4. `src/native-ts/yoga-layout` 是纯 TypeScript 版 Yoga
+这是全库最不寻常的单点实现之一。
 
-这是整个仓库最不寻常的单点实现之一。
+它说明团队不只是想“跑起来”，而是想把布局引擎拉回可控、可调试、可裁剪的 TS 世界。
 
-### 为什么有意思
+## 7. commands / skills / plugins / MCP 被故意打平
 
-- 说明团队在主动摆脱 native 依赖
-- 也说明他们需要一个可控、可调试、可按自己需求裁剪的布局引擎
+最终系统更关心“能力池”，而不是目录边界：
 
-## 5. commands / skills / plugins / MCP 在能力池里被故意打平
+- commands 合并 built-in、skills、plugins、workflow、MCP skill commands
+- tools 又把 built-in 与 MCP tools 合池
+- MCP prompt/resource/tool 最终都能投影到 Claude 自己的执行面
 
-最终模型看到的是统一能力宇宙，而不是四套孤立系统。
+这是一种很强的“统一能力面优先”设计。
 
-### 具体表现
+## 8. `Tool.ts` 比命令协议还重
 
-- `commands.ts` 合并 built-in、skills、plugins、workflows、MCP skill commands
-- `SkillTool` 再把一部分 prompt command 暴露给模型
-- `services/mcp/client.ts` 把远端 MCP 工具包装成 `Tool`
+工具在这里不是普通函数，而是正式运行时对象。
 
-### 为什么有意思
+它们携带：
 
-它暴露出一个核心设计选择：Claude Code 优先统一“能力面”，而不是维护模块边界的纯洁性。
-
-## 6. `Tool` 协议比命令协议还重
-
-`Tool.ts` 不是简简单单的 schema + execute。
-
-它还包括：
-
-- permission
-- UI rendering
-- destructive/read-only
-- progress
-- result collapsing
-- auto-classifier input
+- permission 语义
+- concurrency / interrupt 语义
+- progress / result / transcript 语义
+- UI 渲染
+- context modifier
 - MCP 元信息
 
-### 研究结论
+研究这一层，比研究单个工具实现更重要。
 
-工具在这里是一级运行时实体，而不是命令的下层实现。
+## 9. `query.ts` 是带多重续跑路径的状态机
 
-## 7. 权限系统引入了 transcript-aware classifier
+它不是简单的 LLM request loop，而是持续判断：
 
-`utils/permissions/yoloClassifier.ts` 很反常，因为它不是按命令黑白名单做判断，而是：
+- 什么时候 compact
+- 什么时候 reactive recovery
+- 什么时候继续下一 turn
+- 什么时候 stop hook 重试
+- 什么时候 token-budget continuation
+- 什么时候终止
 
-- 抽会话 transcript
-- 投喂 classifier
-- 按上下文裁决危险操作
+这也是为什么 `QueryEngine.ts` 目前还不能把 REPL 逻辑完全吃掉。
 
-### 为什么有意思
+## 10. `services/mcp/client.ts` 是平台主干，不是 SDK adapter
 
-这是把“安全策略”做成上下文感知代理，而不是 ACL。
+它统一了：
 
-## 8. computer use 被包装成动态 MCP，只为命名兼容
+- transport
+- auth
+- metadata fetch
+- result transformation
+- cache / reconnect
+- Claude-in-Chrome / Computer Use 特例
 
-`utils/computerUse/setup.ts` 里最关键的事实是：
+这意味着 MCP 在 Claude Code 里已经是一等平台平面。
 
-- 之所以包成 `mcp__computer-use__*`
-- 不是因为架构洁癖
-- 而是因为后端 system prompt / availability hint 就是按这个名字识别能力
+## 11. 权限系统已经引入 transcript-aware classifier
 
-### 为什么反常
+`utils/permissions/yoloClassifier.ts`、Bash classifier、`useCanUseTool()` 这一组逻辑说明：
 
-这是一种非常现实主义的设计：协议不是抽象边界，而是后端兼容层。
+- 权限不只是规则表
+- 它会吃 transcript / context
+- 会结合 classifier 与 hook 自动放行或拒绝
 
-## 9. 远程控制子系统不止一套
+这已经不是 ACL，而是“上下文感知安全代理”。
 
-并存的有：
+## 12. remote control 明显不是一条路径
+
+并存的至少有：
 
 - `bridge/`
 - `remote/`
-- `server/directConnect`
+- `server/direct connect`
+- `ssh`
 - `upstreamproxy/`
 
-### 为什么有意思
+它们看起来不像重复实现，更像不同宿主与网络条件下并存的多套方案。
 
-这说明远程控制不是单一路径，而是不同宿主/网络/成本模型下的多套方案并存。
+## 13. `upstreamproxy/` 里有真正的安全/网络基础设施代码
 
-## 10. `upstreamproxy/` 里居然有安全基础设施代码
+包括：
 
-它做的事包括：
-
-- session token
-- CA bundle 拼接
+- session token 处理
+- CA bundle
 - CONNECT-over-WebSocket relay
 - 代理环境注入
 - `prctl(PR_SET_DUMPABLE, 0)`
 
-### 为什么反常
+这已经完全超出了人们对“AI coding CLI”最直觉的预期。
 
-这已经不是“AI 编码工具”给人的第一直觉，而是云端安全和网络控制面代码。
+## 14. `memdir/` 把长期记忆做成文件协议
 
-## 11. 任务模型有四层并存
+不是 opaque state，也不是向量库优先，而是：
 
-- 本地 shell 任务
-- 本地子代理任务
-- 云端 remote agent
-- 同进程 teammate
-
-### 为什么有意思
-
-团队没有把 agent 统一简化成单一执行器，而是把多种隔离级别都产品化了。
-
-## 12. `memdir/` 把长期记忆做成了文件协议
-
-不是向量数据库，不是 opaque state，而是：
-
-- `MEMORY.md` 索引
-- topic 文件正文
-- 类型学
-- 大小限制
+- `MEMORY.md`
+- topic 文件
+- 类型与大小约束
 - team memory
 
-### 为什么有意思
+这让记忆成为可审计、可版本化、可人工理解的资产。
 
-它把记忆变成了可审计、可版本管理、可人为理解的资产。
+## 15. `buddy/`、`voice/`、`moreright/` 暴露出强烈的产品实验层
 
-## 13. `coordinatorMode.ts` 直接把总控代理工作流写进源码
+- `buddy/` 是 companion/pet 系统
+- `voice/` 是横切式产品能力
+- `moreright/` 是 external stub / internal overlay 留痕
 
-包括：
+这说明 Claude Code 想做的不只是工程代理，还包括长期陪伴式终端体验和内部产品试验台。
 
-- worker 能力边界
-- coordinator system prompt
-- 继续/终止 worker 的规则
-- resume 时切 mode 的规则
+## 一句话总判断
 
-### 为什么反常
-
-很多系统把这种东西留在 prompt 模板或文档里；这里把它写成了运行时规则。
-
-## 14. `buddy/` 在严肃平台代码里塞了 companion 系统
-
-它不是简单吉祥物：
-
-- 有 rarity
-- 有 species
-- 有 stats
-- 按用户稳定生成
-
-### 为什么有意思
-
-这说明 Claude Code 想做的不只是工程代理，也包括长期陪伴式终端体验。
-
-## 15. `moreright` 和一批 stub 暴露了 recovered 源码的“缺失层”
-
-这些文件提醒我们：
-
-- 现在看到的不是完整内部源树
-- 而是 external build 可见层 + source map 恢复层 + overlay 缺失层
-
-### 研究上的意义
-
-后续如果要继续深挖，必须把“真实实现不存在”和“当前恢复代码真的就是这样”区分开。
-
-## 一个总判断
-
-Claude Code 最有研究价值的地方，不是它“功能很多”，而是它把下面这些通常分属不同产品的东西强行压进了同一棵运行时树里：
+Claude Code 最值得研究的地方，不是“功能很多”，而是它把下面这些通常属于不同产品的能力强行压进了同一棵运行时树里：
 
 - 终端渲染引擎
-- AI agent turn engine
-- 权限与沙箱策略引擎
-- 插件/技能/MCP 平台
-- 多代理任务系统
-- 远程控制与云端桥接
-- 持久记忆协议
-- 长期产品实验层
+- agent turn 状态机
+- 权限与分类器
+- 插件 / skill / MCP 平台
+- 多执行器任务系统
+- 远程控制与企业网络边界
+- 文件化长期记忆
+- 持续产品实验层

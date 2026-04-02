@@ -14,217 +14,219 @@
 
 ## 总体判断
 
-这份仓库的 UI 层不是“用 Ink 画点终端组件”，而是：
+这一层不是“用 Ink 画几个终端组件”，而是：
 
-- 用 `components/` 搭前台壳
-- 用 `hooks/` 编排行为和副作用
-- 用 `context/` 做横向总线
-- 用 `ink/` 自建终端渲染内核
-- 用 `keybindings/` 和 `vim/` 管输入状态机
+- `components/` 负责前台壳
+- `hooks/` 负责行为编排
+- `context/` 负责全局信号线
+- `ink/` 负责终端渲染内核
+- `keybindings/` 和 `vim/` 负责输入状态机
 
-换句话说，UI 层本身就包含一个小型终端操作系统。
+从结果上看，这一层已经像一个小型终端操作系统，而不只是一个 React TUI。
 
 ## `components`
 
-`components/` 文件最多，仅次于 `utils`。但它不是单纯的展示层，而是多个子系统的前台投影。
+`components/` 的重量不在“数量多”，而在它承载的是多个产品子系统的 UI 投影：
 
-### 组件分片方式
+- transcript / message rendering
+- 权限与审批
+- tasks / agents
+- onboarding / survey / notification
+- IDE / remote / plugin / desktop handoff
 
-从目录和文件命名看，它大致分成几块：
-
-- 权限与确认
-  - `permissions/*`
-  - `TrustDialog/*`
-  - `MCPServerApprovalDialog.tsx`
-- 消息与 transcript
-  - `Messages.tsx`
-  - `MessageSelector.tsx`
-  - `VirtualMessageList.tsx`
-  - `HighlightedCode.tsx`
-- 任务与代理
-  - `tasks/*`
-  - `agents/*`
-  - `TaskListV2.tsx`
-- 输入与导航
-  - `TextInput.tsx`
-  - `VimTextInput.tsx`
-  - `HistorySearchDialog.tsx`
-  - `GlobalSearchDialog.tsx`
-- 设计系统
-  - `design-system/*`
-  - `ui/*`
-- 产品型对话框
-  - onboarding、theme、model、output style、desktop handoff、IDE、feedback、survey、teleport、worktree、team 等
-
-### 最值得记住的点
-
-- 权限 UI 是完整子系统，不是一个弹窗。
-- 任务和 agent 的可视化被长期产品化了，不是调试工具。
-- “终端里做产品” 的气质很强，能看到大量 onboarding、survey、desktop upsell、team、grove、trust、teleport 等产品态。
+它不是纯展示层，而是运行时能力的可视化外壳。
 
 ## `hooks`
 
-`hooks/` 是前台运行时真正的行为层，而不是 React 小工具合集。
+`hooks/` 不是轻量封装，而是前台行为编排层。
 
-### 典型角色
+尤其关键的 hook 类型有：
 
-- 连接运行时和 UI：
-  - `useMergedTools`
-  - `useMergedCommands`
-  - `useCanUseTool`
-  - `useQueueProcessor`
-- 连接远程能力：
-  - `useReplBridge`
-  - `useRemoteSession`
-  - `useDirectConnect`
-  - `useMailboxBridge`
-- 连接本地宿主：
-  - `useIDEIntegration`
-  - `useIdeLogging`
-  - `useDiffInIDE`
-  - `useSSHSession`
-- 连接后台任务与通知：
-  - `useTasksV2`
-  - `useScheduledTasks`
-  - `useInboxPoller`
-  - `hooks/notifs/*`
+- 工具与命令合并：`useMergedTools`、`useMergedCommands`
+- 权限：`useCanUseTool`
+- 队列与会话：`useQueueProcessor`、`useCommandQueue`
+- 远端：`useReplBridge`、`useRemoteSession`、`useDirectConnect`、`useSSHSession`
+- IDE / browser / voice：`useIDEIntegration`、`usePromptsFromClaudeInChrome`、`useVoiceIntegration`
+- 背景任务：`useTasksV2`、`useInboxPoller`、`useSessionBackgrounding`
 
-### 结论
-
-REPL 没有把复杂度消掉，它只是把复杂度拆进大量 hook。`hooks/` 更像行为编排层，而不是组件辅助层。
+所以复杂度没有消失，只是从组件树被拆进了 hook 编排层。
 
 ## `context`
 
-`context/` 文件数很少，但承担跨树总线：
+`context/` 文件不多，但它们承担的是全局 UI 信号总线：
 
-- `notifications.tsx`
-- `mailbox.tsx`
-- `modalContext.tsx`
-- `overlayContext.tsx`
-- `promptOverlayContext.tsx`
-- `stats.tsx`
-- `fpsMetrics.tsx`
-- `voice.tsx`
+- notifications
+- mailbox
+- modal / overlay
+- prompt overlay
+- stats / fps metrics
+- voice
 
-### 作用
-
-- 给大范围组件树注入全局能力
-- 避免把所有横切状态都塞进单一 React prop 链
-- 在 `App.tsx` 级别装配终端前台基础设施
-
-这层并不复杂，但很关键，因为它承担的是“全局 UI 信号线”。
+它们的作用不是“方便传参”，而是把终端前台里跨系统的状态接到一起。
 
 ## `ink`
 
-这是整个仓库最反常的一层之一。
+`src/ink/` 是整棵树里最反常的目录之一。
 
-### 核心判断
+这不是“依赖 Ink”，而是“在 Ink 之上维护一套私有终端内核”。
 
-这不是“使用 Ink”，而是“把 Ink 改造成私有终端渲染内核”。
+它自己处理的内容包括：
 
-### `ink/` 实际自带了什么
+- reconciler
+- DOM / layout 抽象
+- typed-array screen buffer
+- render diff
+- ANSI / OSC / CSI 解析
+- terminal querying
+- selection / search highlight / cursor 语义
 
-- 自定义 reconciler
-- 自定义 DOM 模型
-- 自定义 layout 抽象
-- 自定义 screen buffer
-- 自定义 render diff
-- 自定义 ANSI/OSC/CSI parser
-- 自定义 terminal query 机制
-- 自定义 selection / search highlight / cursor 语义
+这解释了为什么 Claude Code 可以在终端里承载这么重的交互。
 
-### 几个最值得记住的实现
+## `keybindings` 与 `vim`
 
-- `ink.tsx`
-  - 终端实例本体
-  - 处理 alt-screen、selection、search overlay、cursor park、SIGCONT/resize
-- `screen.ts`
-  - typed-array 屏幕表示
-  - 不是字符串拼接，也不是对象数组
-- `renderer.ts` / `output.ts`
-  - 从 DOM 布局结果生成虚拟屏幕，再 diff 到真实终端
-- `terminal-querier.ts`
-  - 用 DA1 哨兵实现“无 timeout 的终端能力探测”
-- `selection.ts`
-  - 终端全文选择子系统
+这两层说明“输入系统”是正式产品能力，而不是彩蛋：
 
-### 为什么这层重要
+- `keybindings/` 维护 schema、用户配置、冲突检查、上下文分层
+- `vim/` 维护相对完整的 normal-mode 语义
 
-它解释了为什么 Claude Code 能在终端里做这么重的交互：不是依赖现成 CLI 库，而是自己接管了终端这个设备。
+这对于 AI agent CLI 来说很不寻常，因为它意味着团队把长期终端使用体验当成了一等需求。
 
-## `keybindings`
+## `buddy`、`voice`、`moreright`
 
-`keybindings/` 是一等系统，不是点缀。
+这几个目录暴露了很强的产品实验痕迹：
 
-### 特征
+- `buddy/companion.ts` 是带 rarity/species/stats 的 companion 系统
+- `voice/` 是顶层 gate，真正的语音能力散在 hooks/services/vendor
+- `moreright/useMoreRight.tsx` 明确提示 external build stub / overlay 缺失
 
-- 支持 schema
-- 支持模板
-- 支持用户配置加载和校验
-- 有保留快捷键与冲突检查
-- 支持按上下文分层
+这类模块提醒我们：这份恢复源码不是单一真实源树，而是“外部构建可见层 + 内部 overlay 缺失痕迹”的组合。
 
-### 意义
+## 第二轮补充研究：`REPL.tsx` concern map
 
-这不是“全局快捷键表”，而是局部状态机输入路由系统。
+`REPL.tsx` 不是 screen，而是前台控制平面。
 
-## `vim`
+### 几个真正的 choke point
 
-`vim/` 规模很小，但完成度很高：
+- `messagesRef + setMessages`
+  - React state 更像渲染投影
+  - 真正的会话真相被这对同步封装握在手里
+- `getToolUseContext`
+  - 每轮 turn 都在这里重新拼装 tools、MCP、权限、通知、IDE、resume 钩子
+- `onSubmit`
+  - 输入路由、transport 路由、历史写入、speculation 接受、query handoff 都在这里汇合
+- `onQuery / onQueryImpl`
+  - 真正的一轮 turn 生命周期
+- `getFocusedInputDialog`
+  - 几乎所有 overlay 的总仲裁器
 
-- `motions.ts`
-- `operators.ts`
-- `textObjects.ts`
-- `transitions.ts`
-- `types.ts`
+### concern map
 
-### 为什么反常
+#### 1. query / message flow
 
-这是一个 AI agent CLI，不是文本编辑器项目，但仍然实现了较完整的 Vim normal-mode 状态机语义。说明团队把“长期终端使用体验”当成正式需求，而不是彩蛋。
+主路径是：
 
-## `buddy`
+- `onSubmit`
+- `handlePromptSubmit`
+- `onQuery`
+- `onQueryImpl`
+- `query()`
+- streamed events 回流本地状态
 
-`buddy/` 是产品气质最跳的一块。
+而 compact boundary、duration message、bridge completion、auto-restore 都插在这个路径的前后。
 
-### 关键事实
+#### 2. permissions
 
-- 它不是单纯的装饰图标，而是一个持久 companion 系统。
-- `companion.ts` 里有 rarity、species、hat、eye、stats、seed。
-- 生成逻辑还按用户 ID 稳定映射，意味着它是“长期绑定用户”的产品层对象。
+同一个文件里同时调度：
 
-### 研究意义
+- tool permission
+- sandbox permission
+- worker sandbox
+- prompt dialog
+- elicitation dialog
 
-它说明这套仓库不是只服务工程执行，还在试图建立“伴随式终端体验”。
+而且这些请求最终进入同一套 dialog 优先级树。
 
-## `voice`
+#### 3. tasks / agents
 
-`src/voice/` 目录本身只有一个 gate 文件，但它的存在提醒一件事：
+这里还承担：
 
-- 语音不是孤立功能
-- 真正的 voice 能力散在：
-  - `services/voice*`
-  - `hooks/useVoice*`
-  - `context/voice.tsx`
-  - `vendor/audio-capture-src`
+- swarm 初始化
+- main-thread agent 限制
+- local agent transcript bootstrap
+- teammate / inbox / mailbox / task list
+- background session handoff
 
-也就是说，`voice` 更像一个顶层 feature flag 入口。
+它不是“显示任务列表”，而是在真正调度任务前台。
 
-## `moreright`
+#### 4. bridge / remote / direct connect / ssh
 
-`moreright/useMoreRight.tsx` 是 external build stub。
+`REPL.tsx` 同时兼容：
 
-### 为什么重要
+- 本地 REPL
+- remote session
+- direct connect
+- SSH session
+- REPL bridge
 
-- 文件本身几乎不做事。
-- 但注释明确说明“真实实现只在内部 overlay 中存在”。
+这几条远端路径都不是在外围包一层，而是深度嵌进提交、权限、消息镜像和回调收尾流程里。
 
-这说明 recovered 源码不是单一真实源树，而是“外部构建可见层 + 内部 overlay 缺失”的拼接结果。
+#### 5. IDE / browser / voice
+
+这一文件里还绑着：
+
+- IDE selection / install / onboarding / logging
+- Claude in Chrome prompt injection 与权限同步
+- voice integration 与 keybinding
+
+所以它既是 agent 会话控制平面，又是宿主环境集成平面。
+
+#### 6. search / history / rewind
+
+这里的“历史”不是只读能力：
+
+- transcript search 是虚拟滚动模式
+- rewind 会恢复权限上下文
+- file history 也会一起回滚
+- selector UI 甚至能触发 partial compact
+
+换句话说，history 在这里是运行时变异能力，不是浏览功能。
+
+#### 7. surveys / overlays
+
+feedback、memory、frustration、skill-improvement、idle-return、desktop upsell、plugin/LSP hint、permission overlay 都在同一套优先级树里竞争显示。
+
+也就是说，安全审批 UI 和产品增长/反馈 UI 共用一个控制栈。
+
+#### 8. rendering / performance
+
+文件里大量逻辑是性能塑形，不是业务逻辑：
+
+- deferred rendering
+- virtual transcript
+- ref-mirrored callback
+- scroll repinning
+- progress/compact dedupe
+- sync/deferred message switching
+
+这说明团队长期在和“终端里做重交互”的成本对抗。
+
+### 第二轮最重要的结论
+
+`REPL.tsx` 的反常点不只是大，而是它把下面这些东西强行汇在同一个控制文件里：
+
+- transport
+- permissions
+- agents/tasks
+- overlays
+- history mutation
+- performance shaping
+
+所以它不是 UI screen，而是前台 control plane。
 
 ## 这一层最反常的地方
 
-1. `REPL.tsx` 不是某个 screen，而是前台应用内核。
-2. `components` 不是纯展示层，而是多个产品子系统的 UI 载体。
-3. `hooks` 是行为总线，不是轻量封装。
-4. `ink` 已经自成终端引擎。
-5. `keybindings` 和 `vim` 说明输入系统被长期产品化。
-6. `buddy`、`voice`、`moreright` 暴露了强烈的内部实验与产品叠层痕迹。
+1. `REPL.tsx` 的真实身份是控制平面，不是界面组件。
+2. `messagesRef + setMessages` 说明 React state 不是唯一真相源。
+3. sandbox / tool approval / product overlay 共享同一优先级树。
+4. history 与 rewind 会直接修改运行时，而不是只读浏览。
+5. `ink/` 已经接近一套私有终端引擎。

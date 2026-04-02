@@ -14,246 +14,178 @@
 
 ## 总体判断
 
-Claude Code 的入口层不是普通 CLI 启动器，而是一套“快路径路由器 + 进程级总控 + 会话引擎 + 前台 REPL 壳”。
+这一层不是普通的 CLI 启动层，而是“进程级路由器 + 会话级引擎装配层”。
 
-如果只看目录名，很容易误以为 `entrypoints/`、`cli/`、`screens/`、`state/` 各管一层；实际上真正的运行时主链路是：
+如果只按目录名理解，很容易误以为：
+
+- `entrypoints/` 只是入口
+- `main.tsx` 只是启动文件
+- `setup.ts` 只是初始化脚本
+- `screens/REPL.tsx` 只是某个界面
+
+实际并不是。真正的主干是：
 
 ```mermaid
 flowchart TD
   A["entrypoints/cli.tsx"] --> B["main.tsx"]
-  A --> C["Fast paths<br/>version / bridge / daemon / bg / MCP"]
-  B --> D["commands.ts + tools.ts + services/*"]
-  B --> E["screens/REPL.tsx"]
-  B --> F["QueryEngine.ts"]
-  E --> G["query.ts"]
-  F --> G
-  G --> H["services/api/claude.ts"]
-  G --> I["services/tools/*"]
-  G --> J["services/mcp/client.ts"]
+  B --> C["run().preAction"]
+  C --> D["entrypoints/init.ts"]
+  B --> E["setup.ts"]
+  E --> F["showSetupScreens + launchRepl"]
+  E --> G["print.ts / SDK / headless path"]
+  F --> H["screens/REPL.tsx"]
+  H --> I["query.ts"]
+  G --> J["QueryEngine.ts"]
+  J --> I
 ```
 
-最关键的事实是：
+## 根级运行时拼接层
 
-- 很多路径根本不会进入完整 REPL。
-- `main.tsx` 本身就是产品级总控单体。
-- `query.ts`/`QueryEngine.ts` 才是“一轮 agent 执行”的核心。
+根级文件并不零散，它们是不同控制面的装配节点：
 
-## `src-root`
+- `main.tsx`：进程级总控、模式分流、入口参数重写、默认命令动作
+- `query.ts`：一轮 agent 执行状态机
+- `QueryEngine.ts`：headless/SDK 会话封装
+- `commands.ts`：用户控制面注册表
+- `tools.ts`：模型控制面注册表
+- `Tool.ts`：工具协议
+- `setup.ts`：会话与工作区预热、后台注册、prefetch
 
-根目录下那批孤立文件，其实不是零碎文件，而是运行时拼接面：
+这层的共同特征是：它们都不是单一业务模块，而是在给整棵运行时树搭骨架。
 
-- `main.tsx`
-- `commands.ts`
-- `tools.ts`
-- `query.ts`
-- `QueryEngine.ts`
-- `setup.ts`
-- `Task.ts`
-- `Tool.ts`
-- `context.ts`
-- `history.ts`
+## `entrypoints/cli.tsx`
 
-它们共同特征是：不属于单一业务域，而是负责把多个大模块缝合到一起。
+`entrypoints/cli.tsx` 的真实角色是 fast-path 路由器，不是单纯“调用 `main()`”。
 
-### 这层最值得注意的点
+它在导入 `main.tsx` 之前就做了几类决定：
 
-- `main.tsx` 是启动和模式分流中枢。
-- `commands.ts` 和 `tools.ts` 分别是用户控制面和模型执行面的注册总线。
-- `query.ts` 和 `QueryEngine.ts` 不是重复，而是“交互式主循环”和“可复用 headless 会话引擎”的分层。
-- `Tool.ts`/`Task.ts` 是运行时协议文件，整个系统的很多复杂度都从这里向外扩散。
+- 先改写环境变量和若干进程级开关
+- 处理一批完全不需要完整应用壳的快速路径
+- 只在默认路径上开始 early input capture
+- 最后才进入 `main.tsx`
 
-## `entrypoints`
+这意味着它并不是“最薄的入口”，而是整个程序的第一层分流器。
 
-### 模块定位
+## `main.tsx`
 
-`entrypoints/` 不是简单 `main()` 包装层，而是冷启动期的特殊入口集合：
+`main.tsx` 是第一个超大总控文件。
 
-- `cli.tsx`
-- `init.ts`
-- `mcp.ts`
-- `sandboxTypes.ts`
-- `agentSdkTypes.ts`
-- `sdk/*`
+它同时承担：
 
-### `entrypoints/cli.tsx`
+- 模块求值阶段的启动副作用
+- CLI 参数重写
+- interactive / headless / remote / direct connect / ssh 等路径选择
+- preAction 初始化屏障
+- 默认命令动作
+- setup、trust、REPL、print/headless 的最终分岔
 
-这是整个仓库最重要的入口文件之一。它的角色不是“启动 REPL”，而是“先把不需要完整应用壳的路径都短路掉”。
+最反常的一点是：这个文件的一部分启动性能优化发生在“模块求值期”，而不是在显式函数调用里。
 
-典型 fast path 包括：
+### 模块求值期副作用
 
-- `--version`
-- dump system prompt
-- Claude in Chrome MCP
-- computer-use MCP
-- daemon worker
-- bridge / remote-control
-- background sessions
-- template jobs
-- environment runner / self-hosted runner
-- tmux + worktree 预处理
+导入 `main.tsx` 时就会发生：
 
-这说明 Claude Code 不是单一命令行程序，而是多个运行模式共用一份入口路由器。
+- startup profiler checkpoint
+- MDM 原始读取预热
+- keychain 预取
+- 若干 feature-gated `require()`
 
-### `entrypoints/init.ts`
+这不是 incidental complexity，而是故意利用“导入期间并行化”来隐藏启动延迟。
 
-`init.ts` 更像启动总线：
+## `entrypoints/init.ts`
 
-- 环境变量处理
-- 配置加载
-- telemetry/growthbook 初始化
-- 远程与 proxy 预热
-- session/trust 相关初始化
+`init.ts` 不是“一个 helper”，而是启动期的正式屏障。
 
-它的重要性在于：很多 feature gate、远程路径和安全路径都需要在真正进入 REPL 前就完成。
+它的顺序大致是：
 
-## `cli`
+1. 启用配置系统
+2. 先应用 safe env vars 与 CA certs
+3. 安装 graceful shutdown
+4. 异步预热 1P logging / OAuth / IDE detection / repo detection
+5. 建立 remote managed settings / policy limits 的 loading promise
+6. 配置 mTLS / proxy / global agents
+7. 预连 Anthropic API
+8. 远端模式下按需初始化 upstream proxy
+9. 注册清理逻辑
+10. 如果启用 scratchpad，则创建目录
 
-`src/cli/` 体量不大，但职责很“底层”：
+这里最值得记住的是：它把“信任前能做什么、信任后能做什么”分得很细。
 
-- print/structured IO
-- transports
-- auth/agents/mcp/auto-mode handlers
+## `setup.ts`
 
-这层说明 Claude Code 不只有 TUI 输出，还有：
+`setup.ts` 是会话级预热层，不是单纯的一次性 init。
 
-- headless print 模式
-- SDK/NDJSON/structured output
-- websocket/SSE 传输
+它负责：
 
-也就是说，`cli/` 更像“进程边界适配层”，而不是命令实现层。
+- session id / cwd / projectRoot 切换
+- UDS inbox 与 teammate snapshot
+- 终端备份恢复
+- hooks snapshot 与文件变更 watcher
+- worktree / tmux 创建与切换
+- background jobs / plugins / hooks / session memory 预热
+- 发出 `tengu_started`
+- 若干 release note / api key / bypass-permission 相关检查
 
-## `bootstrap`
+换句话说，`init.ts` 偏进程级，`setup.ts` 偏会话级。
 
-`src/bootstrap/state.ts` 文件数只有 1，但地位极高。
+## `bootstrap/state.ts` 与 `state/*`
 
-它维护的是进程级全局单例状态，例如：
+这两个状态层同时存在，说明这份代码在维护两类不同状态：
 
-- session id
-- cwd/project root/original cwd
-- interactive/non-interactive 标志
-- client/session source
-- SDK betas
-- 远程模式标志
-- 一些 classifier / transcript / telemetry 相关 latch
+- `bootstrap/state.ts`：进程级 latch 和启动态单例
+- `state/*`：前台会话态与 UI/REPL 运行态
 
-这层很像“启动期全局状态寄存器”。它的存在说明：这个仓库并没有把全部状态都塞进 React store，很多状态在更靠近进程入口的地方就被固定住了。
-
-## `state`
-
-`state/` 不是 Redux，而是自定义 store：
-
-- `AppStateStore.ts`
-- `AppState.tsx`
-- `store.ts`
-- `selectors.ts`
-
-### 特征
-
-- 用 `useSyncExternalStore` 订阅切片，避免大面积重渲染。
-- `AppState` 里混的不只是 UI 状态，而是运行时内核状态：
-  - tasks
-  - bridge
-  - remote
-  - plugins
-  - mcp
-  - toolPermissionContext
-  - replContext
-  - computerUse/browser panel 等产品态
-
-### 结论
-
-这不是“界面状态树”，而是“前台会话运行态树”。
-
-## `screens`
-
-只有三个主屏：
-
-- `REPL.tsx`
-- `Doctor.tsx`
-- `ResumeConversation.tsx`
-
-这件事非常能说明问题：前台交互几乎都被吸进一个巨型会话壳里，而不是分成很多页面。
-
-### `REPL.tsx`
-
-`REPL.tsx` 是第二个超大总控文件。它负责：
-
-- 消息流与 transcript
-- query 循环
-- 权限请求 UI
-- 任务导航与详情弹窗
-- 远程会话与 bridge
-- IDE/voice/plugin/browser panel
-- global search / survey / notifications
-
-它不像“某个 screen 组件”，更像一个终端前台应用内核。
-
-## `query`
-
-`src/query/` 加上根级 `query.ts` / `QueryEngine.ts` 构成了真正的执行核心。
-
-### `query.ts`
-
-负责：
-
-- 发起模型请求
-- 处理流式 assistant blocks
-- 执行 tool use
-- stop hooks
-- compaction
-- token budget
-- tool summaries
-- 递归进入下一轮
-
-这层最像状态机，而不是“调用一次 API”。
-
-### `QueryEngine.ts`
-
-这是把 query 生命周期从 REPL 中抽成可复用引擎的结果：
-
-- 支持 SDK/headless 会话
-- 持久化 messages / read file state / usage
-- 处理 replay user messages
-- 统一 structured output / permission denial / budget 错误
-
-最值得记住的点是：交互式路径和 headless 路径已经开始共用引擎，但并没有完全剥离。仓库处在“引擎化进行到一半”的状态。
+这不是重复设计，而是刻意拆开的两层状态平面。
 
 ## `migrations`
 
-`migrations/` 很小，但意义明确：Claude Code 不是静态工具，而是长期演化产品。
+`migrations/` 体量不大，但非常说明问题：
 
-迁移内容集中在：
+- 默认模型在迁移
+- 权限设置在迁移
+- remote control / MCP / updater 行为在迁移
 
-- 模型默认值变更
-- 自动更新设置
-- bypass permissions/settings 重写
-- MCP 设置迁移
-- remote control 默认项迁移
+这不是按“一次性开源工程”写出来的结构，而是按长期迭代产品写出来的。
 
-这层暴露了产品历史：模型名、默认策略、权限形态都在持续变化。
+## 第二轮补充研究：启动精确调用图
 
-## `assistant`
+### 1. 真正的启动顺序
 
-`assistant/` 目录本身非常薄，当前恢复代码里最显眼的是 `sessionHistory.ts`。
+1. `entrypoints/cli.tsx` 在模块顶层先做 env mutation 和 fast-path 判断。
+2. 只有默认路径才开始 early input capture，并导入 `main.tsx`。
+3. 导入 `main.tsx` 时，startup profiler、MDM 预热、keychain 预热已经开始。
+4. `main()` 再做 Windows PATH 硬化、信号处理、argv 重写、interactive/headless 判定、entrypoint/client type 设置、settings flag 预载入。
+5. `run().preAction` 才是真正的初始化屏障：等待 MDM/keychain、执行 `init()`、挂 sinks、跑 migrations、准备 remote settings/policy limits。
+6. 默认 action 中又会装配权限模式、MCP 初态、bundled skills/plugins，并行跑 `setup()` 与 command/agent discovery。
+7. 最后才分为：
+   - interactive：trust/setup screen -> `launchRepl()`
+   - headless：full env + telemetry + MCP connect + `print.ts`
 
-### 反常点
+### 2. 顶层副作用并不是偶然
 
-- 目录很小，但 “assistant / kairos mode” 却散在全局：
-  - `main.tsx`
-  - `REPL.tsx`
-  - `bridge/`
-  - `remote/`
-  - `tools/BriefTool`
-  - feature gates
+最值得记住的反常点：
 
-### 结论
+- `cli.tsx` 在导入主程序前就改环境变量
+- `main.tsx` 在模块求值期就启动子任务
+- `init.ts` 依赖大量进程级单例状态
 
-`assistant` 不是一个封闭 bounded context，而更像一个横切模式开关。
+这说明这份代码把“导入顺序”本身当成了启动协议的一部分。
+
+### 3. feature gate 不是普通开关
+
+这一层的 `feature(...)` 不只是运行时布尔判断，而是在参与：
+
+- build-time 裁剪
+- import 路径选择
+- 不同 entrypoint 的形状分化
+- 内外部版本差异保留
+
+所以入口层的实际结构，必须结合 feature gate 才能看懂。
 
 ## 这一层最反常的地方
 
-1. `entrypoints/cli.tsx` 是快路径路由器，不是普通 CLI 入口。
-2. `main.tsx` 和 `REPL.tsx` 形成“双巨石内核”。
-3. `QueryEngine.ts` 说明团队在把交互式 agent loop 抽成可复用引擎，但抽离尚未彻底完成。
-4. `bootstrap/state.ts` 和 `state/AppStateStore.ts` 并存，说明这套系统同时维护“进程级状态”和“前台应用状态”。
-5. `migrations/` 的存在提醒我们：这份代码不是按一次性开源项目的标准写的，而是按持续迭代产品写的。
+1. `entrypoints/cli.tsx` 是 fast-path 路由器，不是薄入口。
+2. `main.tsx` 把大量正确性建立在模块求值顺序上。
+3. `init.ts` 与 `setup.ts` 分别维护进程级和会话级初始化，两者都很重。
+4. interactive 与 headless 并不是小分支，而是两条正式产品路径。
+5. `QueryEngine.ts` 虽然出现了，但运行时主干仍然没有完全从 REPL 剥离出来。

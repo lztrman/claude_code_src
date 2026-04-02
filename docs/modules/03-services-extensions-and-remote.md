@@ -12,217 +12,196 @@
 
 ## 总体判断
 
-如果把 `commands/tools/tasks` 看成前台执行面，那么这一层就是后台能力平面：
+如果把 `commands/tools/tasks` 看成前台执行面，那么这里就是后端能力面：
 
-- `services` 提供 API、MCP、tool execution、analytics、policy 等服务
+- `services` 提供 API、MCP、policy、analytics、tool execution、LSP 等主干服务
 - `skills/plugins` 把系统做成可扩展平台
-- `bridge/remote/server/upstreamproxy` 把本地会话扩展成远程控制宿主
+- `bridge/remote/server/upstreamproxy` 把本地会话扩展成远端、容器、桥接与代理环境
 
-这一层最强烈的信号是：Claude Code 不是单机 CLI，而是一个可以被本地、远程、云端、插件、MCP、多代理共同驱动的平台。
+这一层最重要的信号是：Claude Code 不是单机 CLI，而是一个可被本地、远端、云端、插件和 MCP 共同驱动的平台。
 
 ## `services`
 
 `services/` 不是薄服务层，而是第二个运行时核心。
 
-### 最重要的几组子系统
+最重要的几组子系统包括：
 
-#### 1. API 与模型调用
-
-- `services/api/claude.ts`
-- `services/api/client.ts`
-- `services/api/errors.ts`
-- `services/api/logging.ts`
-
-这层负责：
-
-- Claude API 调用
-- betas
-- thinking
-- structured output
-- usage/cost
-- retry
-- provider 差异
-
-它几乎就是 LLM transport 内核。
-
-#### 2. MCP
-
-- `services/mcp/client.ts`
-- `services/mcp/config.ts`
-- `services/mcp/auth.ts`
-- `services/mcp/officialRegistry.ts`
-- `services/mcp/claudeai.ts`
-
-这是整棵树里最重要的子系统之一。MCP 在这里不只是插件协议，而是：
-
-- tool 来源
-- resource 来源
-- prompt 来源
-- auth 路径
-- UI/permissions/remote 的一部分
-
-### 结论
-
-MCP 在 Claude Code 里是一等公民，不是外挂。
-
-#### 3. tool execution
-
-- `services/tools/toolExecution.ts`
-- `services/tools/toolOrchestration.ts`
-- `services/tools/StreamingToolExecutor.ts`
-
-这层把模型发出的 tool use 变成：
-
-- 可中断
-- 可追踪
-- 可并发
-- 可带 hook/telemetry
-- 可进入任务平面
-
-#### 4. analytics / policy / managed settings
-
+- `services/api/*`
+- `services/mcp/*`
+- `services/tools/*`
+- `services/compact/*`
 - `services/analytics/*`
 - `services/policyLimits/*`
 - `services/remoteManagedSettings/*`
-
-这说明 Claude Code 不是孤立工具，而是持续在线产品：
-
-- feature gate
-- 组织策略
-- 远程下发设置
-- telemetry
-
-都是主干能力。
-
-#### 5. 其它产品化子系统
-
-- `services/compact/*`
-- `services/tips/*`
-- `services/voice*`
-- `services/PromptSuggestion/*`
 - `services/lsp/*`
-- `services/SessionMemory/*`
 
-这些子系统数量多、职责杂，但共同说明一件事：这是长期演化产品，不是单点工具。
+其中最重的主干之一就是 `services/mcp/client.ts`。
 
-## `skills`
+## `skills` 与 `plugins`
 
-`skills/` 是本地 prompt 能力层。
+这两层共同说明：prompt 资产、插件命令、工作流、hooks、agent 定义最终都被编进同一能力池。
 
-### 组成
+这不是“支持插件”，而是：
 
-- `loadSkillsDir.ts`
-- `bundledSkills.ts`
-- `bundled/*`
-- `mcpSkillBuilders.ts`
+- skills 是可加载 prompt 资产
+- plugins 是可安装扩展包
+- MCP 又能继续往能力池里注入 tool/resource/prompt/skill
 
-### 关键事实
+系统最终优先统一能力面，而不是维护目录边界纯洁性。
 
-- skill 本质上会被编译成一种 `prompt command`
-- bundled skills 是同步注册的
-- 本地技能、bundled skills、plugin skills、MCP skills 最终都可能进入统一能力池
+## `bridge`、`remote`、`server`
 
-### 反常点
+这三层说明远程控制不是一条额外路径，而是正式架构面：
 
-这套系统把“prompt 资产”产品化了，而不是把 prompt 留在代码字面量里。
+- `bridge/` 偏 host 侧控制和 remote-control
+- `remote/` 偏会话客户端与状态适配
+- `server/` 暴露 direct-connect 路径
 
-## `plugins`
-
-`src/plugins/` 本身很薄，真正的重量在 `utils/plugins/`，但从顶层模块看，它承担的是“内建插件壳”。
-
-### 信号
-
-- Claude Code 不只是能“装插件”
-- 它本身就带内建插件机制
-- 插件还可以进一步提供：
-  - commands
-  - skills
-  - output styles
-  - hooks
-  - agents
-
-### 结论
-
-插件不是附加层，而是平台扩展面的正式入口。
-
-## `bridge`
-
-`bridge/` 是远程控制主栈。
-
-### 它做的事
-
-- remote-control / bridge mode
-- 会话创建与恢复
-- bridge permission callbacks
-- session runner
-- bridge API / config / status
-- REPL bridge
-- remote bridge core
-
-### 为什么重要
-
-这不是单纯 websocket 层，而是“把本地机器暴露成远程可控工作环境”的宿主。
-
-### 反常点
-
-- bridge 并不是一条额外路径，而是和主运行时同等级的模式。
-- 很多逻辑围绕 feature gate、auth、version、policy 和 session ingress 组织，明显是产品级远控系统。
-
-## `remote`
-
-`remote/` 更像 bridge 的客户端侧观察和控制层：
-
-- `RemoteSessionManager.ts`
-- `SessionsWebSocket.ts`
-- `sdkMessageAdapter.ts`
-- `remotePermissionBridge.ts`
-
-### 作用
-
-- 维持远程会话状态
-- 做消息适配
-- 跨会话桥接权限/事件
-
-它说明“远程”不是一个按钮，而是会话级运行模型。
-
-## `server`
-
-`server/` 规模很小，但含义明确：
-
-- `createDirectConnectSession.ts`
-- `directConnectManager.ts`
-- `types.ts`
-
-### 为什么值得记
-
-这代表另一条远程路径：direct connect。
-
-也就是说，远程控制并不只有 bridge 一套做法。
+因此，remote 并不是“加个 websocket”，而是正式的会话模型。
 
 ## `upstreamproxy`
 
-这是整个仓库里最反常的一块之一。
+`upstreamproxy/` 是整个仓库里最反常的目录之一。
 
-### 它做什么
+它处理的不是普通 CLI 问题，而是：
 
-- 在 CCR 容器内读取 session token
-- 拼接 CA bundle
-- 起本地 CONNECT -> WebSocket relay
-- 给子进程继承代理环境变量
-- 在 Linux 下通过 `prctl(PR_SET_DUMPABLE, 0)` 减少 token 被同 UID ptrace 抓堆的风险
+- session token
+- CA bundle 拼接
+- CONNECT-over-WebSocket relay
+- 代理环境注入
+- Linux 下的进程级安全加固
 
-### 为什么反常
+单看这个目录，很难把它和“代码助手 CLI”联系起来；但它说明 Claude Code 已经深入到远端容器、企业网络与安全边界中。
 
-这已经是安全/网络基础设施代码，而不是普通 CLI 逻辑。
+## 第二轮补充研究：`services/mcp/client.ts`
 
-### 研究结论
+`services/mcp/client.ts` 不是单纯的 SDK adapter，而是 MCP 平台核心。
 
-如果只看 `upstreamproxy/`，很难把它和“终端 AI 编码工具”联系起来。但它恰恰说明 Claude Code 已经深入到远程容器与企业网络环境。
+### 1. transport matrix
+
+| server type | transport | 备注 |
+| --- | --- | --- |
+| `sse` | `SSEClientTransport` | 带 auth provider，单独处理长连接 fetch |
+| `http` | `StreamableHTTPClientTransport` | 带 fresh timeout、proxy、step-up detection |
+| `ws` | 自定义 `WebSocketTransport` | 合并 headers、代理、TLS 选项 |
+| `sse-ide` | `SSEClientTransport` | IDE 特化，无常规 auth |
+| `ws-ide` | `WebSocketTransport` | 走 `X-Claude-Code-Ide-Authorization` |
+| `stdio` | `StdioClientTransport` | 默认本地 MCP 形态 |
+| `claudeai-proxy` | `StreamableHTTPClientTransport` | 经 Claude.ai OAuth 与 proxy URL |
+| Chrome / Computer Use | in-process linked transport | 明确绕开外部 stdio 子进程 |
+
+最有意思的点不是“支持很多 transport”，而是所有这些 transport 最终都被揉进同一个客户端抽象里。
+
+### 2. auth 不是统一层，而是 transport-specific
+
+这里的认证策略明显按 transport 分裂：
+
+- SSE/HTTP：`ClaudeAuthProvider`
+- HTTP/WS：可叠加 session-ingress bearer token
+- `ws-ide`：IDE 专用头
+- `sse-ide`：显式无常规 auth
+- `claudeai-proxy`：Claude.ai OAuth + session id 头
+- 各 server 的静态/动态头再通过 `getMcpServerHeaders()` 合并
+
+这说明 auth 不是“外围通用 middleware”，而是 MCP transport 协议的一部分。
+
+### 3. 缓存与 memoization 是三层结构
+
+目前至少能看到三层缓存：
+
+- `mcp-needs-auth-cache.json`
+  - 15 分钟 auth failure 缓存
+- `connectToServer`
+  - 按 `server name + serialized config` memoize
+- `fetchToolsForClient` / `fetchResourcesForClient` / `fetchCommandsForClient`
+  - LRU memoization
+
+这层缓存结构说明 MCP client 不只是“调用远端”，而是长期承载连接生命周期和 metadata 生命周期。
+
+### 4. tool / resource / command 获取逻辑
+
+`services/mcp/client.ts` 不只拉 tools：
+
+- `fetchToolsForClient`
+  - 调 `tools/list`
+  - 清洗 Unicode
+  - 截断过长 description
+  - 映射注解到 Claude tool flags
+  - 包装成可调用工具
+- `fetchResourcesForClient`
+  - 调 `resources/list`
+  - 绑定 server 来源
+- `fetchCommandsForClient`
+  - 调 `prompts/list`
+  - 把 MCP prompt 转成命令
+  - 与 MCP skills 合流
+
+也就是说，MCP 在这里不仅是 tool provider，还是 resource provider 和 prompt/command provider。
+
+### 5. 结果处理不是简单 passthrough
+
+结果转换路径大致是：
+
+1. `transformResultContent`
+2. `transformMCPResult`
+3. `processMCPResult`
+
+处理中会区分：
+
+- text
+- image
+- audio
+- binary blob
+- resource / resource_link
+
+大结果会被截断或落盘，再把“如何读取”作为文本结果回给模型或 UI。
+
+所以 MCP 输出在这里已经被做成“Claude 自己的内容协议”。
+
+### 6. 特殊分支：Claude-in-Chrome 与 Computer Use
+
+这两条路径非常反常：
+
+- 它们在 transport 层就被特殊拦截
+- 直接走 in-process linked transport
+- Computer Use 甚至明确写着 package 自己的 `CallTool` handler 是 stub，真实调度走 wrapper override
+
+这说明 MCP 在这里既是标准协议，也被拿来当本地能力统一外壳。
+
+### 7. 错误与重连策略非常激进
+
+这份文件内建了大量恢复逻辑：
+
+- 连接超时
+- 每次请求 fresh timeout
+- tool 调用独立 timeout
+- auth failure -> needs-auth
+- session expired -> clear cache + reconnect
+- URL elicitation retry
+- SSE/HTTP/claudeai-proxy 的 session 过期检测
+- stdio 子进程清理升级链
+
+它明显不是“失败了就抛错”，而是在自己维护一套正式的连接状态机。
+
+## 这一层目前最重要的判断
+
+`services/mcp/client.ts` 暴露出一个核心事实：
+
+- Claude Code 已经把 MCP 当成平台主干，而不是外接协议。
+
+它统一了：
+
+- transport
+- auth
+- metadata 生命周期
+- 结果协议变换
+- 重连与恢复
+- 内建特化能力注入
 
 ## 这一层最反常的地方
 
-1. `services/mcp` 把 MCP 做成了平台主干，而不是 SDK 集成点。
-2. `skills`、`plugins`、`MCP` 最终会在能力池里互相打平。
-3. `bridge`、`remote`、`server/direct connect`、`upstreamproxy` 同时存在，说明远程控制不止一条实现路径。
-4. `upstreamproxy` 暴露了很强的云端/安全基础设施气质。
-5. `services/analytics`、`policyLimits`、`remoteManagedSettings` 说明这份代码是长期产品内核，而不是离线工具。
+1. MCP 在这里是主干，不是插件协议。
+2. tools / resources / prompts / skills 会在能力池里汇合。
+3. 远程控制并不只有一套路径：bridge、remote、direct connect、upstream proxy 并存。
+4. `upstreamproxy/` 让这份代码显露出明显的企业网络与安全基础设施气质。
+5. Claude-in-Chrome 与 Computer Use 被强行包装进同一 MCP 语义面，说明协议兼容优先于架构洁癖。

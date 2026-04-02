@@ -1,123 +1,120 @@
 # 下一轮前线
 
-这份文件的目的不是记录“还没看完”，而是给下一次执行留一个高质量起点。
+这份文件不是记录“还没看完”，而是给下一次执行留下高质量起点。
 
-## 本轮已经完成的事
+## 本轮已完成
 
-- 建立了完整的顶层模块地图
-- 把所有顶层模块落到了对应章节
-- 把几条主线明确下来：
-  - 启动/入口
-  - UI/终端内核
-  - 命令/工具/任务
-  - 服务/扩展/远程
-  - 基础设施/策略底座
-- 抽出了跨模块异常点专题
+- 顶层模块地图已经建立并落到 `module-map.md`
+- `src` 与 `vendor` 的顶层模块已经全部归类到模块章节
+- 第二轮已经补完下面这些主干深挖：
+  - 启动精确路径：`entrypoints/cli.tsx -> main.tsx -> init.ts -> setup.ts`
+  - `REPL.tsx` concern map
+  - `query.ts` 执行序列
+  - `QueryEngine.ts` 的真实边界
+  - 工具生命周期
+  - `services/mcp/client.ts` 架构拆解
 
 ## 下一轮最值得优先做的事
 
-### 1. 把 `main.tsx` 的启动路径画成精确调用图
+### 1. 把 `REPL.tsx` 的状态 choke points 画成正式地图
 
-当前只完成了高层描述。下一轮应做：
+这一轮已经确认它是 control plane，但下一轮还需要更精确：
 
-- 列出所有 fast path
-- 列出进入完整 REPL 前的关键初始化顺序
-- 标明哪些初始化依赖 `feature()`，哪些依赖 `USER_TYPE`
-- 专门梳理 top-level side effects
+- `messagesRef`
+- `setMessages`
+- `AppState`
+- command queue
+- permission queues
+- 各类 refs 与 bridge callback refs
 
-最值得补的文件：
+目标不是再说一次“它很大”，而是画出真正的状态真相源和写入边界。
 
-- `src/entrypoints/cli.tsx`
-- `src/main.tsx`
-- `src/setup.ts`
-- `src/entrypoints/init.ts`
+### 2. 把 `onSubmit` 做成分支表
 
-### 2. 把 `REPL.tsx` 拆成“关注点地图”
+这是 REPL 中最值得单独拆解的函数之一。
 
-当前知道它是巨型前台壳，但还缺一份真正可用的 concern map。
+下一轮建议按这些维度做表：
 
-建议下一轮按这些维度切：
+- 本地 query
+- remote session
+- direct connect
+- ssh
+- queued command
+- speculation accept
+- history write
+- attachment serialization
+- idle-return / survey / permission 交互影响
 
-- query/message flow
-- permissions
-- tasks/agents
-- bridge/remote
-- IDE/browser/voice
-- search/history/navigation
-- surveys/product overlays
+### 3. 追完整条 permissions 流程
 
-### 3. 把 `query.ts` 做成正式 sequence 文档
+建议专门拉一轮：
 
-要回答的问题：
+- `hasPermissionsToUseTool`
+- `useCanUseTool`
+- `PermissionContext`
+- `toolExecution.ts`
+- sandbox / worker sandbox / bridge remote approval
+- `yoloClassifier` 与 Bash speculative classifier
 
-- 一次 user message 进入后，怎么变成 API 请求
-- tool use 是怎么被串行/并行执行的
-- stop hooks、compact、budget、structured output 是在哪些节点插入的
-- `QueryEngine.ts` 与 `query.ts` 的真正边界是什么
+目标是弄清：
 
-### 4. 深挖 `services/mcp/client.ts`
+- 谁先判规则
+- 谁触发 classifier
+- 谁落日志
+- 谁弹 UI
+- 谁能远端代批
 
-MCP 是主干之一，但本轮只完成高层定位。
+### 4. 继续深挖 `services/mcp/client.ts` 的调用后半段
 
-下一轮应补：
+这一轮主要完成了 transport / auth / metadata / result pipeline 总览。
 
-- transport 形态总表
-- auth 形态总表
-- resources/prompts/tools 的统一抽象
-- Claude-in-Chrome / computer-use 特判路径
-- MCP 输出存储与 UI 映射
+下一轮可以继续拆：
 
-### 5. 追踪工具执行的完整生命周期
+- `callMCPToolWithUrlElicitationRetry`
+- `callMCPTool`
+- `transformMCPResult`
+- `processMCPResult`
+- `setupSdkMcpClients`
 
-建议专门写一篇附加文档，覆盖：
+目标是形成“从工具名到最终 transcript/UI 呈现”的精确路径图。
 
-- `Tool.ts`
-- `tools.ts`
-- `services/tools/toolOrchestration.ts`
-- `services/tools/toolExecution.ts`
-- `services/tools/StreamingToolExecutor.ts`
-- `hooks/useCanUseTool.tsx`
+### 5. 回答 `QueryEngine.ts` 到底是不是迁移终点
 
-目标是搞清楚：
+现在能确认：
 
-- 谁决定能不能执行
-- 谁决定如何展示
-- 谁决定如何写回 transcript
-- 谁决定变成 task / background work
+- 它已经是 headless/SDK 主壳
+- 但 REPL 仍直接调用 `query()`
 
-### 6. 把 external stub 和内部 overlay 痕迹单列出来
+下一轮需要继续判断：
 
-这块很重要，因为它直接影响对 recovered 源码的判断。
+- 还有哪些 REPL 责任没法被引擎化
+- 哪些只是技术债
+- 哪些是交互式前台天然无法抽离的职责
 
-下一轮建议建立一个清单：
+### 6. 系统性清点 external stub / internal overlay 痕迹
 
-- 哪些文件明显是 stub
-- 哪些模块只剩 external 版壳
-- 哪些注释明确提到 ant-only / overlay / external build
-- 哪些 feature gate 只在内部版有意义
+这一块非常重要，因为它直接影响对 recovered 源码的判断。
 
-## 可追加的专题
+下一轮建议建立清单：
 
-如果下一轮时间足够，优先扩展这些专题：
+- 明显 stub 的文件
+- 只剩 external 壳的模块
+- 注释里明确提到 ant-only / overlay / external build 的地方
+- 哪些 feature gate 只在内部版本有实际意义
 
-- `utils/permissions` 的完整裁决流程图
-- `utils/plugins` 的版本缓存与安装路径
+## 可追加专题
+
+如果时间够，优先加这些：
+
+- `bridge`、`remote`、`direct connect`、`ssh`、`upstreamproxy` 的长期关系图
 - `memdir` 的文件协议与 prompt 注入机制
-- `upstreamproxy` 的容器网络与安全设计
-- `native-ts` 从 native 迁回 TS 的工程动机
+- `utils/plugins` 的版本缓存、安装和热重载路径
+- `native-ts` 为什么要从 native 迁回 TS
 
 ## 写作约定
 
-下次继续研究时，优先遵守下面这几条：
-
-1. 新内容优先追加到已有章节，不要随意新开散乱文件。
-2. 如果发现跨模块异常点，先更新 `findings/interesting-anomalies.md`，再补对应模块章节。
-3. 如果发现新的顶层模块或目录变化，先更新 `module-map.md`。
-4. 如果只是局部深挖，不要重写总览，直接在章节里新增“补充研究”小节。
-
-## 当前未决问题
-
-- `REPL.tsx` 中真正的 concern 边界在哪里，哪些只是历史堆叠，哪些是当前必要耦合。
-- `QueryEngine.ts` 最终是否意图完全替代交互式 query 主循环，还是只服务 SDK/headless。
-- internal overlay 缺失对 `assistant`、`moreright`、若干 stub commands 的影响到底有多大。
-- bridge、remote、direct connect、upstreamproxy 四套远程机制之间的长期关系是什么：互补、替代，还是历史叠加。
+1. 新内容优先并回已有 `modules/` 章节，不随意开散文件。
+2. 如果发现跨模块异常，先更新 `findings/interesting-anomalies.md`。
+3. 如果发现顶层目录变化，先更新 `module-map.md`。
+4. 如果只是局部深挖，优先追加“补充研究”小节，而不是重写总览。
+5. 对复杂调用链，优先用阶段图或状态图，而不是只堆段落。
